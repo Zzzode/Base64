@@ -32,214 +32,146 @@
 
 #include "base64.h"
 
+#include <_types/_uint8_t.h>
+
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
 
 namespace test1 {
-// Depending on the url parameter in base64_chars, one of two sets of base64
-// characters needs to be chosen. They differ in their last two characters.
-static constexpr const char* base64_chars[2] = {
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"};
+static constexpr char kPadding = '=';
+/* clang-format off */
+static const signed char base64de[] = {
+        /* '+', ',', '-', '.', '/', '0', '1', '2', */
+        62, -1, -1, -1, 63, 52, 53, 54,
 
-// Return the position of chr within base64_encode()
-static unsigned int pos_of_char(const unsigned char chr) {
-  if (chr >= 'A' && chr <= 'Z')
-    return chr - 'A';
-  else if (chr >= 'a' && chr <= 'z')
-    return chr - 'a' + ('Z' - 'A') + 1;
-  else if (chr >= '0' && chr <= '9')
-    return chr - '0' + ('Z' - 'A') + ('z' - 'a') + 2;
-  else if (chr == '+' || chr == '-')
-    return 62;  // Be liberal with input and accept both url ('-') and non-url
-                // ('+') base 64 characters (
-  else if (chr == '/' || chr == '_')
-    return 63;  // Ditto for '/' and '_'
-  else
-    // 2020-10-23: Throw std::exception rather than const char*
-    //(Pablo Martin-Gomez, https://github.com/Bouska)
-    throw std::runtime_error("Input is not valid base64-encoded data.");
+        /* '3', '4', '5', '6', '7', '8', '9', ':', */
+        55, 56, 57, 58, 59, 60, 61, -1,
+
+        /* ';', '<', '=', '>', '?', '@', 'A', 'B', */
+        -1, -1, 0, -1, -1, -1, 0, 1,
+
+        /* 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', */
+        2, 3, 4, 5, 6, 7, 8, 9,
+
+        /* 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', */
+        10, 11, 12, 13, 14, 15, 16, 17,
+
+        /* 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', */
+        18, 19, 20, 21, 22, 23, 24, 25,
+
+        /* '[', '\', ']', '^', '_', '`', 'a', 'b', */
+        -1, -1, -1, -1, -1, -1, 26, 27,
+
+        /* 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', */
+        28, 29, 30, 31, 32, 33, 34, 35,
+
+        /* 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', */
+        36, 37, 38, 39, 40, 41, 42, 43,
+
+        /* 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', */
+        44, 45, 46, 47, 48, 49, 50, 51,
+};
+/* clang-format on */
+
+// Returns -1 in case of failure.
+int decode(const char* str, uint32_t len, uint8_t* ret, uint32_t dst_size) {
+  if (!len || str == nullptr) {
+    return -1;
+  }
+  const size_t min_dst_size = dec_size(len);
+  if (dst_size < min_dst_size) {
+    return -1;
+  }
+  size_t wr_size = 0;
+#pragma omp parallel for
+  for (int j = 0; j < len; j += 4) {
+    uint32_t val =
+        (base64de[str[j] - '+'] << 18) | (base64de[str[j + 1] - '+'] << 12) |
+        (base64de[str[j + 2] - '+'] << 6) | (base64de[str[j + 3] - '+']);
+    wr_size = (j >> 2) * 3;
+    ret[wr_size] = val >> 16;
+    ret[wr_size + 1] = val >> 8;
+    ret[wr_size + 2] = val;
+  }
+
+  if (str[len - 1] == kPadding) {
+    wr_size--;
+  } else if (str[len - 2] == kPadding) {
+    wr_size -= 2;
+  }
+  return wr_size;
 }
 
-static std::string base64_encode(unsigned char const* bytes_to_encode,
-                                 size_t in_len, bool url) {
-  size_t len_encoded = (in_len + 2) / 3 * 4;
+void encode(const uint8_t* bytes, uint32_t len, char* chars) {
+  uint32_t end = len / 3;
+  constexpr const char* b64_chars =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+#pragma omp parallel for
+  for (uint32_t i = 0; i < end; i++) {
+    int j = i + (i << 1), k = i << 2;
+    uint32_t three_bytes = bytes[j] << 16 | bytes[j + 1] << 8 | bytes[j + 2];
+    chars[k] = b64_chars[three_bytes >> 18 & 63];
+    chars[k + 1] = b64_chars[three_bytes >> 12 & 63];
+    chars[k + 2] = b64_chars[three_bytes >> 6 & 63];
+    chars[k + 3] = b64_chars[three_bytes & 63];
+  }
 
-  char trailing_char = url ? '.' : '=';
-
-  // Choose set of base64 characters. They differ for the last two positions,
-  // depending on the url parameter.
-  // A bool (as is the parameter url) is guaranteed to evaluate to either 0 or 1
-  // in C++ therefore, the correct character set is chosen by subscripting
-  // base64_chars with url.
-  const char* base64_chars_ = base64_chars[url ? 1 : 0];
-
-  std::string ret;
-  ret.reserve(len_encoded);
-
-  unsigned int pos = 0;
-
-  while (pos < in_len) {
-    ret.push_back(base64_chars_[(bytes_to_encode[pos + 0] & 0xfc) >> 2]);
-
-    if (pos + 1 < in_len) {
-      ret.push_back(base64_chars_[((bytes_to_encode[pos + 0] & 0x03) << 4) +
-                                  ((bytes_to_encode[pos + 1] & 0xf0) >> 4)]);
-
-      if (pos + 2 < in_len) {
-        ret.push_back(base64_chars_[((bytes_to_encode[pos + 1] & 0x0f) << 2) +
-                                    ((bytes_to_encode[pos + 2] & 0xc0) >> 6)]);
-        ret.push_back(base64_chars_[bytes_to_encode[pos + 2] & 0x3f]);
-      } else {
-        ret.push_back(base64_chars_[(bytes_to_encode[pos + 1] & 0x0f) << 2]);
-        ret.push_back(trailing_char);
-      }
-    } else {
-      ret.push_back(base64_chars_[(bytes_to_encode[pos + 0] & 0x03) << 4]);
-      ret.push_back(trailing_char);
-      ret.push_back(trailing_char);
+  int loc = end << 2;
+  end += end << 1;
+  switch (len - end) {
+    case 0:
+      break;
+    case 1: {
+      uint32_t last = bytes[end] << 4;
+      chars[loc++] = b64_chars[last >> 6 & 63];
+      chars[loc++] = b64_chars[last & 63];
+      chars[loc++] = '=';
+      chars[loc++] = '=';
+      break;
     }
-
-    pos += 3;
-  }
-
-  return ret;
-}
-
-static std::string base64_decode(std::string const& encoded_string,
-                                 bool remove_linebreaks) {
-  if (encoded_string.empty()) return {};
-
-  if (remove_linebreaks) {
-    std::string copy(encoded_string);
-
-    copy.erase(std::remove(copy.begin(), copy.end(), '\n'), copy.end());
-
-    return base64_decode(copy, false);
-  }
-
-  size_t length_of_string = encoded_string.length();
-  size_t pos = 0;
-
-  // The approximate length (bytes) of the decoded string might be one or
-  // two bytes smaller, depending on the amount of trailing equal signs
-  // in the encoded string. This approximation is needed to reserve
-  // enough space in the string to be returned.
-  size_t approx_length_of_decoded_string = length_of_string / 4 * 3;
-  std::string ret;
-  ret.reserve(approx_length_of_decoded_string);
-
-  while (pos < length_of_string) {
-    // Iterate over encoded input string in chunks. The size of all
-    // chunks except the last one is 4 bytes.
-    //
-    // The last chunk might be padded with equal signs or dots
-    // in order to make it 4 bytes in size as well, but this
-    // is not required as per RFC 2045.
-    //
-    // All chunks except the last one produce three output bytes.
-    //
-    // The last chunk produces at least one and up to three bytes.
-
-    size_t pos_of_char_1 = pos_of_char(encoded_string.at(pos + 1));
-
-    // Emit the first output byte that is produced in each chunk:
-    ret.push_back(static_cast<std::string::value_type>(
-        ((pos_of_char(encoded_string.at(pos + 0))) << 2) +
-        ((pos_of_char_1 & 0x30) >> 4)));
-
-    if ((pos + 2 <
-         length_of_string) &&  // Check for data that is not padded with equal
-                               // signs (which is allowed by RFC 2045)
-        encoded_string.at(pos + 2) != '=' &&
-        encoded_string.at(pos + 2) !=
-            '.'  // accept URL-safe base 64 strings, too, so check for '.' also.
-    ) {
-      // Emit a chunk's second byte (which might not be produced in the last
-      // chunk).
-      unsigned int pos_of_char_2 = pos_of_char(encoded_string.at(pos + 2));
-      ret.push_back(static_cast<std::string::value_type>(
-          ((pos_of_char_1 & 0x0f) << 4) + ((pos_of_char_2 & 0x3c) >> 2)));
-
-      if ((pos + 3 < length_of_string) && encoded_string.at(pos + 3) != '=' &&
-          encoded_string.at(pos + 3) != '.') {
-        // Emit a chunk's third byte (which might not be produced in the last
-        // chunk).
-        ret.push_back(static_cast<std::string::value_type>(
-            ((pos_of_char_2 & 0x03) << 6) +
-            pos_of_char(encoded_string.at(pos + 3))));
-      }
+    case 2: {
+      uint32_t last = bytes[end] << 10 | bytes[end + 1] << 2;
+      chars[loc++] = b64_chars[last >> 12 & 63];
+      chars[loc++] = b64_chars[last >> 6 & 63];
+      chars[loc++] = b64_chars[last & 63];
+      chars[loc++] = '=';
+      break;
     }
+    default:
+      break;
+  }
+  chars[loc] = 0;
+}
 
-    pos += 4;
+std::string b64encode(const std::string& str) {
+  const char* input = str.c_str();
+  size_t len = str.size();
+  char* output = new char[(len + 2) / 3 * 4];
+  encode((const uint8_t*)input, len, output);
+  return output;
+}
+
+std::string b64decode(const std::string& str) {
+  const char* input = str.c_str();
+  size_t len = str.size();
+
+  size_t j = 0, pad1 = len % 4 || input[len - 1] == '=',
+         pad2 = pad1 && (len % 4 > 2 || input[len - 2] != '=');
+  const size_t last = (len - pad1) / 4 << 2;
+  size_t size = str.size();
+
+  char* output = new char[last / 4 * 3 + pad1 + pad2];
+
+  if (decode(input, len, (uint8_t*)output, len) == -1) {
+    return "";
   }
 
-  return ret;
-}
-
-std::string decode(std::string const& s, bool remove_linebreaks) {
-  return base64_decode(s, remove_linebreaks);
-}
-
-std::string encode(std::string const& s, bool url) {
-  return base64_encode(reinterpret_cast<const unsigned char*>(s.data()),
-                       s.length(), url);
+  return output;
 }
 }  // namespace test1
 
 namespace test2 {
-static constexpr const unsigned char base64_table[65] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/**
- * base64_encode - Base64 encode
- * @src: Data to be encoded
- * @len: Length of the data to be encoded
- * @out_len: Pointer to output length variable, or %NULL if not used
- * Returns: Allocated buffer of out_len bytes of encoded data,
- * or empty string on failure
- */
-std::string base64_encode(const unsigned char* src, size_t len) {
-  unsigned char *out, *pos;
-  const unsigned char *end, *in;
-
-  size_t olen;
-
-  olen = 4 * ((len + 2) / 3); /* 3-byte blocks to 4-byte */
-
-  if (olen < len) return std::string(); /* integer overflow */
-
-  std::string outStr;
-  outStr.resize(olen);
-  out = (unsigned char*)&outStr[0];
-
-  end = src + len;
-  in = src;
-  pos = out;
-  while (end - in >= 3) {
-    *pos++ = base64_table[in[0] >> 2];
-    *pos++ = base64_table[((in[0] & 0x03) << 4) | (in[1] >> 4)];
-    *pos++ = base64_table[((in[1] & 0x0f) << 2) | (in[2] >> 6)];
-    *pos++ = base64_table[in[2] & 0x3f];
-    in += 3;
-  }
-
-  if (end - in) {
-    *pos++ = base64_table[in[0] >> 2];
-    if (end - in == 1) {
-      *pos++ = base64_table[(in[0] & 0x03) << 4];
-      *pos++ = '=';
-    } else {
-      *pos++ = base64_table[((in[0] & 0x03) << 4) | (in[1] >> 4)];
-      *pos++ = base64_table[(in[1] & 0x0f) << 2];
-    }
-    *pos++ = '=';
-  }
-
-  return outStr;
-}
-
 static constexpr const char* B64chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -310,27 +242,6 @@ std::string b64encode(const std::string& str) {
 
 std::string b64decode(const std::string& str64) {
   return b64decode(str64.c_str(), str64.size());
-}
-
-std::string base64_decode(const std::string& in) {
-  std::string out;
-
-  std::vector<int> T(256, -1);
-  for (int i = 0; i < 64; i++)
-    T["ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[i]] =
-        i;
-
-  int val = 0, valb = -8;
-  for (unsigned char c : in) {
-    if (T[c] == -1) break;
-    val = (val << 6) + T[c];
-    valb += 6;
-    if (valb >= 0) {
-      out.push_back(char((val >> valb) & 0xFF));
-      valb -= 8;
-    }
-  }
-  return out;
 }
 
 }  // namespace test2

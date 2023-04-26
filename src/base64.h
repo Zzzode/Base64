@@ -9,15 +9,16 @@
 #include <string>
 
 namespace test1 {
-std::string encode(std::string const& s, bool url = false);
-std::string decode(std::string const& s, bool remove_linebreaks = false);
+inline constexpr size_t dec_size(size_t src_size) {
+  return (src_size + 3) / 4 * 3;
+}
+
+std::string b64encode(const std::string& str);
+std::string b64decode(const std::string& str);
 }  // namespace test1
 
 namespace test2 {
-std::string base64_encode(const unsigned char* src, size_t len);
-std::string base64_decode(const void* data, const size_t len);
-std::string base64_decode(const std::string& encoded_string);
 std::string b64encode(const std::string& str);
-std::string b64decode(const std::string& str64);
+std::string b64decode(const std::string& str);
 }  // namespace test2
 #endif

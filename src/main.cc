@@ -6,7 +6,7 @@
 
 #include "base64.h"
 
-constexpr const char *file_in = "test/text1.txt";
+constexpr const char *file_in = "test/text.txt";
 
 int main(int argc, char **argv) {
   std::ifstream file(file_in);  // open file for reading
@@ -18,18 +18,18 @@ int main(int argc, char **argv) {
   {
     auto start_encode =
         std::chrono::high_resolution_clock::now();  // start encode timing
-    std::string encoded = test1::encode(str);
+    std::string encoded = test1::b64encode(str);
     auto end_encode =
         std::chrono::high_resolution_clock::now();  // end encode timing
 
     auto start_decode =
         std::chrono::high_resolution_clock::now();  // start decode timing
-    std::string decoded = test1::decode(encoded);
+    std::string decoded = test1::b64decode(encoded);
     auto end_decode =
         std::chrono::high_resolution_clock::now();  // end decode timing
 
     if (str == decoded) {
-      std::cout << "Contriguations 🎇 test1" << std::endl;
+      std::cout << "Congratulations 🎇 test1" << std::endl;
     }
 
     auto encode_time = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
         std::chrono::high_resolution_clock::now();  // end decode timing
 
     if (str == decoded) {
-      std::cout << "Contriguations 🎇 test2" << std::endl;
+      std::cout << "Congratulations 🎇 test2" << std::endl;
     }
 
     auto encode_time = std::chrono::duration_cast<std::chrono::microseconds>(

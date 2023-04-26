@@ -7,12 +7,19 @@ else ()
     set(RUST_BUILD_TYPE "Release")
 endif ()
 
-set(CMAKE_C_FLAGS "${COMPILE_FLAGS}")
+# set(CMAKE_C_COMPILER "${EMCC}" CACHE FILEPATH "emscripten c compiler" FORCE)
+# set(CMAKE_CXX_COMPILER "${EMXX}" CACHE FILEPATH "emscripten c++ compiler" FORCE)
+
+# The common options using by both c and cxx
+set(COMPILE_C_FLAGS "")
+set(COMPILE_CXX_FLAGS "-std=gnu++17")
+
+set(CMAKE_C_FLAGS "${COMPILE_C_FLAGS}")
 set(CMAKE_C_FLAGS_DEBUG "-g")
 set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 # the actual options for cxx
-set(CMAKE_CXX_FLAGS "${COMPILE_FLAGS}")
+set(CMAKE_CXX_FLAGS "${COMPILE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
